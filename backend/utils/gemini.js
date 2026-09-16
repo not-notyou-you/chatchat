@@ -4,9 +4,23 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 const { dbGet, dbRun } = require("./asyncDb");
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: process.env.GEMINI_MODEL || "gemini-2.5-flash" });
+
+// primary model first, then fallbacks used when Google reports the model as overloaded
+const MODELS = [
+  process.env.GEMINI_MODEL || "gemini-2.5-flash",
+  ...(process.env.GEMINI_FALLBACK_MODELS || "gemini-3.5-flash-lite")
+    .split(",")
+    .map((m) => m.trim())
+    .filter(Boolean),
+].filter((m, i, all) => all.indexOf(m) === i);
+
+const RETRY_STATUSES = [429, 500, 502, 503, 504];
+const RETRIES_PER_MODEL = 2;
+const RETRY_DELAY_MS = 800;
 
 const RATE_LIMIT = parseInt(process.env.GEMINI_RATE_LIMIT_PER_MINUTE) || 60;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const getRateLimitRecord = async () => {
   const record = await dbGet("SELECT * FROM gemini_rate_limit WHERE id = 1");
@@ -64,10 +78,27 @@ const callGemini = async (userInput, topMatches) => {
   }
 
   const prompt = buildPrompt(userInput, topMatches);
-  const result = await model.generateContent(prompt);
-  const text = result.response.text().trim();
+  let lastError;
 
-  return { response: text, rateLimited: false };
+  for (const name of MODELS) {
+    const model = genAI.getGenerativeModel({ model: name });
+
+    for (let attempt = 0; attempt <= RETRIES_PER_MODEL; attempt++) {
+      try {
+        const result = await model.generateContent(prompt);
+        const text = result.response.text().trim();
+        if (name !== MODELS[0]) console.warn(`[Gemini] fallback model used: ${name}`);
+        return { response: text, rateLimited: false, model: name };
+      } catch (err) {
+        lastError = err;
+        if (!RETRY_STATUSES.includes(err.status)) break;
+        console.warn(`[Gemini] ${name} returned ${err.status}, attempt ${attempt + 1}`);
+        if (attempt < RETRIES_PER_MODEL) await sleep(RETRY_DELAY_MS * (attempt + 1));
+      }
+    }
+  }
+
+  throw lastError;
 };
 
 module.exports = { callGemini };

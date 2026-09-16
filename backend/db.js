@@ -7,18 +7,20 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false },
   max: 20,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 5000,
+  connectionTimeoutMillis: 15000,
 });
 
 pool.on("error", (err) => {
   console.error("PostgreSQL pool error:", err.message);
 });
 
-pool.connect((err) => {
+// warm up the pool, but keep serving: a slow first connect must not kill the process
+pool.connect((err, client, release) => {
   if (err) {
-    console.error("Failed to connect to database:", err.message);
-    process.exit(1);
+    console.error("Initial database connection failed:", err.message);
+    return;
   }
+  release();
   console.log("Connected to Supabase PostgreSQL");
 });
 

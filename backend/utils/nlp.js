@@ -1,11 +1,21 @@
 // backend/utils/nlp.js
-const Sastrawi = require("sastrawijs");
+// sastrawijs leaves debug console.log calls in its stemmer; mute them while it runs
+const silenced = (fn) => {
+  const log = console.log;
+  console.log = () => {};
+  try {
+    return fn();
+  } finally {
+    console.log = log;
+  }
+};
 
-const stemmer = new Sastrawi.Stemmer();
+const Sastrawi = silenced(() => require("sastrawijs"));
+
+const stemmer = silenced(() => new Sastrawi.Stemmer());
 
 const tokenize = (text) =>
-  stemmer
-    .stem(text.toLowerCase())
+  silenced(() => stemmer.stem(text.toLowerCase()))
     .split(" ")
     .filter(Boolean);
 

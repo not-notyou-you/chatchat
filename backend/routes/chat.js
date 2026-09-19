@@ -1,14 +1,20 @@
 // backend/routes/chat.js
 const { Router } = require("express");
 const { dbQuery, dbRun } = require("../utils/asyncDb");
-const { similarity, findTopMatches } = require("../utils/nlp");
+const { similarity, findTopMatches, buildIdf } = require("../utils/nlp");
 const { callGemini } = require("../utils/gemini");
 
 const router = Router();
 
-const SCORE_THRESHOLD = 0.5;
+// Di atas SCORE_THRESHOLD jawaban dianggap pasti dan langsung dikirim.
+// Antara SUGGEST_THRESHOLD dan SCORE_THRESHOLD kecocokan benar dan salah
+// bercampur di skor yang sama, jadi daripada menebak, tawarkan pilihan.
+const SCORE_THRESHOLD = Number(process.env.SCORE_THRESHOLD) || 0.5;
+const SUGGEST_THRESHOLD = Number(process.env.SUGGEST_THRESHOLD) || 0.4;
 const DEFAULT_RESPONSE = "Maaf, saya belum memahami pertanyaan Anda.";
 const GEMINI_ERROR_RESPONSE = "Maaf, asisten sedang tidak tersedia. Silakan coba lagi nanti.";
+
+let idfRowCount = 0;
 
 router.post("/", async (req, res) => {
   const userInput = (req.body.message || "").toLowerCase().trim();
@@ -34,6 +40,12 @@ router.post("/", async (req, res) => {
       LEFT JOIN intents i ON q.intent_id = i.id
     `);
 
+    // Bobot IDF ikut berubah kalau daftar pertanyaan di DB berubah.
+    if (rows.length !== idfRowCount) {
+      buildIdf(rows.map((r) => r.question || ""));
+      idfRowCount = rows.length;
+    }
+
     let bestScore = 0;
     let best = null;
 
@@ -57,6 +69,20 @@ router.post("/", async (req, res) => {
 
     const topMatches = findTopMatches(userInput, rows, 5);
 
+    if (bestScore >= SUGGEST_THRESHOLD) {
+      const suggested = buildSuggestion(topMatches);
+
+      if (suggested) {
+        await saveLog(null, suggested.response, bestScore, "shy", userInput, createdAt);
+        return res.json({
+          ...suggested,
+          score: Number(bestScore.toFixed(2)),
+          emotion: "shy",
+          source: "suggestion",
+        });
+      }
+    }
+
     if (topMatches.length === 0) {
       await saveLog(null, DEFAULT_RESPONSE, 0, "shy", userInput, createdAt);
       return res.json({
@@ -76,8 +102,12 @@ router.post("/", async (req, res) => {
       emotion = geminiResult.rateLimited ? "shy" : "neutral";
     } catch (geminiErr) {
       console.error("[Gemini Error]", geminiErr.status ?? "", geminiErr.message);
-      response = GEMINI_ERROR_RESPONSE;
-      source = "error";
+
+      // Gemini mati bukan alasan untuk tidak menjawab: kita masih punya
+      // kecocokan terdekat dari database, jauh lebih berguna daripada pesan error.
+      const fallback = buildSuggestion(topMatches);
+      response = fallback ? fallback.response : GEMINI_ERROR_RESPONSE;
+      source = fallback ? "suggestion" : "error";
       emotion = "shy";
     }
 
@@ -94,6 +124,34 @@ router.post("/", async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
+
+function buildSuggestion(topMatches) {
+  const suggestions = pickDistinctIntents(topMatches, 3);
+  if (!suggestions.length) return null;
+
+  return {
+    response:
+      "Maksud Anda salah satu ini?\n" +
+      suggestions.map((s, i) => `${i + 1}. ${s.question}`).join("\n"),
+    suggestions: suggestions.map((s) => s.question),
+  };
+}
+
+// Beberapa pertanyaan berbeda bisa menunjuk intent yang sama; saran yang
+// ditampilkan harus benar-benar berbeda pilihannya.
+function pickDistinctIntents(matches, limit) {
+  const seen = new Set();
+  const picked = [];
+
+  for (const match of matches) {
+    if (seen.has(match.intent_id)) continue;
+    seen.add(match.intent_id);
+    picked.push(match);
+    if (picked.length === limit) break;
+  }
+
+  return picked;
+}
 
 async function saveLog(intentId, response, score, emotion, userInput, createdAt) {
   await dbRun(

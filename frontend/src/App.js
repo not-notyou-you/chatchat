@@ -8,6 +8,7 @@ const EMOTIONS = ["angry","cheerful","happy","neutral","serious","shy"];
 
 const SOURCE_LABELS = {
   database:     "Database",
+  suggestion:   "Suggestion",
   gemini:       "AI Assist",
   rate_limited: "Throttled",
   error:        "Error",
@@ -17,6 +18,7 @@ const SOURCE_LABELS = {
 
 const SOURCE_STATUS = {
   database:     "Searching database...",
+  suggestion:   "Finding closest matches...",
   gemini:       "Asking assistant...",
   rate_limited: "Assistant is busy",
   error:        "Assistant unavailable",

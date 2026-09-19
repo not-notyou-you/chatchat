@@ -1,6 +1,6 @@
 // backend/utils/gemini.js
 require("dotenv").config();
-const { GoogleGenerativeAI } = require("@google/generative-ai");
+const { GoogleGenAI } = require("@google/genai");
 const { dbGet, dbRun } = require("./asyncDb");
 
 const API_KEY = process.env.GEMINI_API_KEY;
@@ -9,7 +9,7 @@ if (!API_KEY) {
   console.warn("[Gemini] GEMINI_API_KEY tidak diset — semua panggilan akan gagal.");
 }
 
-const genAI = new GoogleGenerativeAI(API_KEY);
+const genAI = new GoogleGenAI({ apiKey: API_KEY });
 
 // primary model first, then fallbacks used when Google reports the model as overloaded
 const MODELS = [
@@ -87,12 +87,10 @@ const callGemini = async (userInput, topMatches) => {
   let lastError;
 
   for (const name of MODELS) {
-    const model = genAI.getGenerativeModel({ model: name });
-
     for (let attempt = 0; attempt <= RETRIES_PER_MODEL; attempt++) {
       try {
-        const result = await model.generateContent(prompt);
-        const text = result.response.text().trim();
+        const result = await genAI.models.generateContent({ model: name, contents: prompt });
+        const text = result.text.trim();
         if (name !== MODELS[0]) console.warn(`[Gemini] fallback model used: ${name}`);
         return { response: text, rateLimited: false, model: name };
       } catch (err) {

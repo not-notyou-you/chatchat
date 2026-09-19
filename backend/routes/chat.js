@@ -17,7 +17,8 @@ const GEMINI_ERROR_RESPONSE = "Maaf, asisten sedang tidak tersedia. Silakan coba
 let idfRowCount = 0;
 
 router.post("/", async (req, res) => {
-  const userInput = (req.body.message || "").toLowerCase().trim();
+  // Body datang dari luar: pesan bisa saja angka, objek, atau tidak ada sama sekali.
+  const userInput = String(req.body?.message ?? "").toLowerCase().trim();
   const createdAt = new Date().toISOString();
 
   try {

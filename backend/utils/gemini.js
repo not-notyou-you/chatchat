@@ -7,18 +7,13 @@ const API_KEY = process.env.GEMINI_API_KEY;
 
 if (!API_KEY) {
   console.warn("[Gemini] GEMINI_API_KEY tidak diset — semua panggilan akan gagal.");
-} else if (!API_KEY.startsWith("AIza")) {
-  console.warn(
-    `[Gemini] GEMINI_API_KEY diawali "${API_KEY.slice(0, 3)}", bukan "AIza". ` +
-      "Token sementara (ephemeral) akan kedaluwarsa; pakai API key dari Google AI Studio."
-  );
 }
 
 const genAI = new GoogleGenerativeAI(API_KEY);
 
 // primary model first, then fallbacks used when Google reports the model as overloaded
 const MODELS = [
-  process.env.GEMINI_MODEL || "gemini-2.5-flash",
+  process.env.GEMINI_MODEL || "gemini-3.5-flash",
   ...(process.env.GEMINI_FALLBACK_MODELS || "gemini-3.5-flash-lite")
     .split(",")
     .map((m) => m.trim())
